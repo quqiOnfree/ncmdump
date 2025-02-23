@@ -3,6 +3,7 @@
 #include "base64.h"
 #include "cJSON.h"
 #include "color.h"
+#include "thread_pool.hpp"
 
 #define TAGLIB_STATIC
 #include "taglib/toolkit/tfile.h"
@@ -15,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <filesystem>
+#include <vector>
 
 #pragma warning(disable:4267)
 #pragma warning(disable:4244)
@@ -26,29 +28,28 @@ const unsigned char NeteaseCrypt::mPng[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A,
 
 static void aesEcbDecrypt(const unsigned char *key, std::string &src, std::string &dst)
 {
-    int n, i;
-
-    unsigned char out[16];
-
-    n = src.length() >> 4;
-
+    cxxpool::ThreadPool thread_pool;
+    thread_pool.start();
+    int n = src.length() >> 4, i;
     dst.clear();
-
+    dst.resize(n << 4);
     AES aes(key);
 
     for (i = 0; i < n - 1; i++)
     {
-        aes.decrypt((unsigned char *)src.c_str() + (i << 4), out);
-        dst += std::string((char *)out, 16);
+        thread_pool.submit(&AES::decrypt, &aes, (const unsigned char *)src.c_str() + (i << 4), (unsigned char *)dst.data() + (i << 4));
     }
 
-    aes.decrypt((unsigned char *)src.c_str() + (i << 4), out);
-    char pad = out[15];
+    if (thread_pool.joinable())
+        thread_pool.join();
+
+    aes.decrypt((const unsigned char *)src.c_str() + (i << 4), (unsigned char *)dst.data() + (i << 4));
+    char pad = dst.c_str()[(i << 4) + 15];
     if (pad > 16)
     {
         pad = 0;
     }
-    dst += std::string((char *)out, 16 - pad);
+    dst.resize((n << 4) - pad);
 }
 
 static void replace(std::string &str, const std::string &from, const std::string &to)
